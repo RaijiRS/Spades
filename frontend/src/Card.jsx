@@ -12,7 +12,7 @@ export default function Card({value}){
     return(
         <div
             ref = {dragRef}
-            className = {`w-20 h-32 border rounded-lg shadow flex items-center justify-center text-3xl bg-white cursor-move ${isDragging ? 'opacity-50': ''}`} //tailwind utlity class
+            className = {`w-12.5 h-20 border rounded-lg shadow flex items-center justify-center text-3xl cursor-move`} //tailwind utlity class
         >
             {value}
         </div>
