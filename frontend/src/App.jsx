@@ -13,100 +13,379 @@ import dudu from './assets/dudu.jpg';
 import Iggy from './assets/Iggy.jpg';
 import blindMan from './assets/blindMan.jpg';
 
-// Card Generation Logic 
-function generateRandomHand(numCards = 13) {
-  const suits = ['♠', '♥', '♦', '♣']; // Spades, Hearts, Diamonds, Clubs
-  const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+//Game Constants
+const numPlayers = 4;
+const cardsPerHand = 13;
+const gamePhases = {
+  dealing: 'dealing',
+  bidding: 'bidding',
+  playingTrick: 'playingTrick',
+  roundEnd: 'roundEnd',
+  gameEnd: 'gameEnd',
 
+};
+
+const suits = ['♠', '♥', '♦', '♣']; // Spades, Hearts, Diamonds, Clubs
+const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+
+function createAndShuffleDeck() {
   const deck = [];
-  
   for (const suit of suits) {
     for (const rank of ranks) {
-      deck.push(rank + suit); 
+      deck.push(rank + suit);
     }
   }
-
-  // Shuffle the deck (Fisher-Yates algorithm)
   for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1)); 
-    [deck[i], deck[j]] = [deck[j], deck[i]]; 
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
   }
-
-  // Draw the specified number of cards
-  return deck.slice(0, numCards);
+  return deck;
 }
 
+//Player data
+const initialPlayers = [
+    {id:0, name: 'You',hand:[],bid:null,tricksWon:0,score:0,isHuman:true, avatar: dudu},
+    {id:1, name: 'Iggy',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar: Iggy},
+    {id:2, name: 'Raffey',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar: raffey},
+    {id:3, name: 'BlindMan',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar:blindMan},
+    
+
+
+];
+
 function App() {
-  // State for managing the custom modal messages
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMessage, setModalMessage] = useState('');
+
+//Game State
+const [game,setGame] = useState({
+  players: initialPlayers,
+  currentPlayerId: 0,
+  gamePhase: gamePhases.dealing,
+  currentTrick:[],
+  bidCounts:{},
+  humanBidConfirmed: false,
+
+
+});
+
+
+
+//modal State
+const [isModalOpen,setIsModalOpen] = useState(false);
+const [modalMessage,setModalMessage] = useState('');
+
+const closeModal = useCallback(() => {
+  setIsModalOpen(false);
+  setModalMessage('');
+
+},[]);
+
+
+//Deal Cards
+const dealCards = useCallback(() => {
+  const shuffleDeck = createAndShuffleDeck();
+  const newPlayers = game.players.map((player, index)=>{
+      const startIndex = index * cardsPerHand;
+      const endIndex = startIndex + cardsPerHand;
+      return{
+        ...player,
+        hand:shuffleDeck.slice(startIndex, endIndex),
+        bid:null,
+        tricksWon:0,
+      }; 
+
+  });
+
+  setGame(prevGame => ({
+    ...prevGame,
+    players: newPlayers,
+    gamePhase: gamePhases.bidding,
+    currentPlayerId: 0,
+    currentTrick:[],
+    bidCounts:{},
+    humanBidConfirmed: false,
+
+  }));
+
+
+},[game.players]);
+
+//Human Bid
+const handleHumanBid = useCallback((bidValue) =>{
+  if(game.gamePhase !== gamePhases.bidding || game.players[game.currentPlayerId].isHuman === false) 
+  return;
+
+  setGame(prevGame => {
+    const newPlayers = prevGame.players.map(p =>
+      p.id === prevGame.currentPlayerId ? {...p,bid:bidValue} : p
+    );
+    const newBidCounts = {...prevGame.bidCounts, [prevGame.currentPlayerId]: bidValue };
+
+    //next turn
+    let nextPlayerId = (prevGame.currentPlayerId + 1) % numPlayers;
+    let newPhase = gamePhases.bidding;
+
+    if(Object.keys(newBidCounts).length === numPlayers ){
+      newPhase = gamePhases.playingTrick;
+      nextPlayerId = 0;
+    }
+
+    return{
+      ...prevGame,
+      players: newPlayers,
+      bidCounts: newBidCounts,
+      currentPlayerId: nextPlayerId,
+      gamePhase: newPhase,
+      humanBidConfirmed: true,
+    }
+  });
+    
+}, [game.gamePhase,game.currentPlayerId, game.players]);
+
+// AI bidding(basic random number)
+const aiBid = useCallback((playerId)=>{
+  const bidValue = Math.floor(Math.random() * 4) + 1;
+
+  setGame(prevGame => {
+    const newPlayers = prevGame.players.map(p =>
+      p.id === playerId ? {...p,bid:bidValue} : p
+    );
+    const newBidCounts = {...prevGame.bidCounts,[playerId]: bidValue};
+
+    let nextPlayerId = (playerId + 1) % numPlayers;
+    let newPhase = gamePhases.bidding;
+
+    if(Object.keys(newBidCounts).length === numPlayers){
+      newPhase = gamePhases.playingTrick;
+      nextPlayerId = 0;
+    }
+
+    return{
+      ...prevGame,
+      players: newPlayers,
+      bidCounts:newBidCounts,
+      currentPlayerId: nextPlayerId,
+      gamePhase: newPhase,
+    };
+
+  });
+
+}, []);
+
+//human play 
+const handleHumanCardPlay = useCallback((cardValue)=>{
+  if (game.gamePhase !== gamePhases.playingTrick||game.players[game.currentPlayerId].isHuman === false)
+    return;
+
+  setGame(prevGame => {
+    const newPlayers = prevGame.players.map(p =>
+      p.id === prevGame.currentPlayerId? {...p, hand: p.hand.filter(c => c !== cardValue)} : p
+    );
+    const newTrick = [...prevGame.currentTrick,{playerId: prevGame.currentPlayerId, cardValue}];
+
+    //next turn
+    let nextPlayerId = (prevGame.currentPlayerId + 1) % numPlayers;
+    let newPhase = gamePhases.playingTrick;
+
+    if(newTrick.length === numPlayers){
+      //IMPLEMENT TRICK WINNER LOGIC
+      newPhase = gamePhases.playingTrick;//temp
+      nextPlayerId = 0;
+      setModalMessage(`Trick complete ${newTrick.map(c => c.cardValue).join(', ')}`);
+      setIsModalOpen(true);
+      setTimeout(() =>{
+        closeModal();
+        setGame(g =>({...g, currentTrick:[], currentPlayerId: g.players[0].id}));
+      },3000); // wait 3 seconds
+    }
+
+    return{
+      ...prevGame,
+      players: newPlayers,
+      currentTrick: newTrick.length === numPlayers? []: newTrick,
+      currentPlayerId: newTrick.length === numPlayers? (game.players[0].id) : nextPlayerId,
+      gamePhase: newPhase,
+    };
+
+
+  });
+},[game.gamePhase, game.currentPlayerId, game.players, closeModal]);
+
+//ai card play
+const chooseAICard = useCallback((aiHand) => {
+  if(aiHand.length === 0) return null;
+  return aiHand[0];
+},[]);
+ 
+//game flow
+useEffect(() => {
+  dealCards();
+},[dealCards]);
+
+useEffect(()=> {
+  const currentPlayer = game.players[game.currentPlayerId];
+
+  if(!currentPlayer || currentPlayer.isHuman){
+    return;
+  }
+
+  const timer = setTimeout(()=> {
+    if(game.gamePhase === gamePhases.bidding){
+      aiBid(currentPlayer.id);
+    }else if (game.gamePhase === gamePhases.playingTrick){
+      const cardToPlay = chooseAICard(currentPlayer.hand);
+      if(cardToPlay){
+        setGame(prevGame => {
+          const newPlayers = prevGame.players.map(p =>
+            p.id === currentPlayer.id ? {...p, hand: p.hand.filter(c => c !== cardToPlay)} : p
+          );
+            const newTrick = [...prevGame.currentTrick, {playerId: currentPlayer.id, cardValue: cardToPlay}];
+
+            let nextPlayerId = (currentPlayer.id + 1) % numPlayers;
+            let newPhase = gamePhases.playingTrick;
+
+            if(newTrick.length === numPlayers){
+              //determine winner
+              newPhase = gamePhases.playingTrick;
+              nextPlayerId = 0;
+              setModalMessage(`AI played Trick Over! Cards: ${newTrick.map(c=>c.cardValue).join(', ')}.(winner logic pending)`);
+              setIsModalOpen(true);
+              setTimeout(()=> {
+                closeModal();
+                setGame(g => ({...g, currentTrick: [], currentPlayerId: g.players[0].id}));
+
+              },3000);
+            }
+
+            return{
+              ...prevGame,
+              players: newPlayers,
+              currentTrick: newTrick.length === numPlayers ? [] : newTrick,
+              currentPlayerId: newTrick.length === numPlayers ? (game.players[0].id): nextPlayerId,
+              gamePhase: newPhase,
+            };
+
+        });
+      }
+    }
+  }, 1000);
+
+  return () => clearTimeout(timer);
+
+},[game.currentPlayerId,game.gamePhase,game.players, aiBid, chooseAICard, closeModal]);
+ 
+const humanplayer = game.players[0];
+
 
   
-  const [playerCards, setPlayerCards] = useState([]);
 
-  // Initialize the player's hand with 13 random cards when the component mounts
-  useEffect(() => {
-    setPlayerCards(generateRandomHand(13));
-  }, []); 
-
-  // Avatars array (kept from your original code, though not directly used in rendering below)
-  const avatars = [
-    raffey,
-    dudu,
-    Iggy,
-    blindMan
-  ];
-
- 
-  const handleDrop = useCallback((cardValue) => {
-    setModalMessage(`Card played: ${cardValue}`);
-    setIsModalOpen(true);
-    // Remove the played card from the player's hand
-    setPlayerCards(prevCards => prevCards.filter(card => card !== cardValue));
-  }, []);
-
-  // Function to close the modal
-  const closeModal = useCallback(() => {
-    setIsModalOpen(false);
-    setModalMessage('');
-  }, []);
-
+  
   return (
-    <div className="relative h-screen w-screen bg-green-500 font-inter flex flex-col items-center justify-between">
+    <div className="relative h-screen w-screen bg-green-900 font-inter flex flex-col items-center justify-between">
       
-      <img
-        src={raffey}
-        alt='Top Player Avatar' 
-        className='avatar-img absolute top-4 left-1/2 transform -translate-x-1/2 w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 border-white shadow-lg object-cover z-20'
-      />
-      <img
-        src={Iggy}
-        alt='Left Player Avatar' 
-        className='avatar-img absolute left-4 top-1/2 transform -translate-y-1/2 w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 border-white shadow-lg object-cover z-20'
-      />
-      <img
-        src={blindMan}
-        alt='Right Player Avatar' 
-        className='avatar-img absolute right-4 top-1/2 transform -translate-y-1/2 w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 border-white shadow-lg object-cover z-20'
-      />
-      <img
-        src={dudu}
-        alt='Bottom Player Avatar' 
-        className='avatar-img absolute bottom-4 left-1/2 transform -translate-x-1/2 w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 border-white shadow-lg object-cover z-20'
-      />
+
+        {game.players.map(player => {
+          let className = 'avatar-img absolute w-20 h-20 sm:w-24 sm:h-24 rounded-full border-4 border-white shadow-lg object-cover z-20';
+        // Dynamic positioning based on player ID
+        if (player.id === 0) className += ' bottom-4 left-1/2 transform -translate-x-1/2'; // Human (Bottom)
+        else if (player.id === 1) className += ' left-4 top-1/2 transform -translate-y-1/2'; // Iggy (Left)
+        else if (player.id === 2) className += ' top-4 left-1/2 transform -translate-x-1/2'; // Raffey (Top)
+        else if (player.id === 3) className += ' right-4 top-1/2 transform -translate-y-1/2'; // BlindMan (Right)
+       
+       if(player.id === game.currentPlayerId){
+          className += 'border-purple-400 ring-4 ring-purple-400';
+       }
+
+       return(
+          <div key={player.id} className={className}>
+              <img src = {player.avatar} alt={`${player.name} Avatar`}/>
+              <div className='absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-white text-sm font-bold bg-gray-700 px-2 py-1 rounded'>
+                {player.name}
+              
+              </div>
+              {game.gamePhase !== gamePhases.dealing && player.bid !== null && (
+                <div className='absolute -top-6 left-1/2 transform -translate-x-1/2 text-white text-md font-bold bg-purple-700 px-2 py-1 rounded'>
+                  Bid: {player.bid}
+                </div>
+              )}
+              {game.gamePhases === gamePhases.playingTrick && game.currentTrick.find(t => t.playerId === player.id) &&(
+                <div className='absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30'>
+                  <Card value ={game.currentTrick.find(t => t.playerId === player.id).cardValue} isPlayed = {true}/>
+                </div>
+              )}
+              </div>
+
+       );
+       
+       })}
+
+        
+
+
+
+      
 
       <DndProvider backend={HTML5Backend}>
         
-        <div className="flex-grow flex items-center justify-center w-full max-w-3xl px-4">
-          <PlayArea onDrop={handleDrop} />
+        <div className="flex-grow flex flex-col items-center justify-center w-full max-w-3xl px-4 z-1">
+          <h2 className = 'text-white text-xl font-bold mb-4'>
+            {game.gamePhase === gamePhases.bidding && game.players[game.currentPlayerId].isHuman
+              ?`Your turn to Bid ${game.currentPlayerId + 1}`
+              : game.gamePhase === gamePhases.bidding
+              ?`Player ${game.currentPlayerId + 1} is bidding`
+              :game.players[game.currentPlayerId].isHuman
+              ? `Your turn to play ${game.currentPlayerId + 1}`
+              :`${game.currentPlayerId + 1} is playing`
+            
+            }
+          </h2>
+
+          {game.gamePhase === gamePhases.bidding && humanplayer.isHuman && game.currentPlayerId === humanplayer.id && !game.humanBidConfirmed && (
+            <div className='flex items-center space-x-2 mb-4'>
+              <label htmlFor= "bid" className='text-white text-lg'>Your Bid: </label>
+              <select
+                id='bid'
+                className='p-2 rounded bg-white text-gray-800'
+                onChange = {(e) => handleHumanBid(parseInt(e.target.value))}
+                value = {humanplayer.bid || ''}
+              >
+                <option value = "">Select Bid</option>
+                {Array.from({length: cardsPerHand}, (_,i) => i + 1).map(bid =>(
+                  <option key = {bid} value= {bid}>{bid}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+
+          <PlayArea onDrop = {handleHumanCardPlay} disabled = {game.gamePhase !== gamePhases.playingTrick|| !humanplayer.isHuman || game.currentPlayerId !== humanplayer.id}/>
+
+          {game.currentTrick.length > 0 && (
+            <div className='flex justify-center mt-4 space-x-2'>
+                {game.currentTrick.map((playedCard, index) => (
+                  <div key ={index} className='relative'>
+                    <Card value ={playedCard.cardValue} isPlayed = {true}/>
+                    <span className='absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-white text-xs bg-gray-700 px-1 py-0.5 rounded'>
+                      P{playedCard.playerId + 1}
+                    </span>
+                  </div>
+                ))}
+
+            </div>
+          )}
+
+
         </div>
 
         
-        <div className="w-full max-w-4xl flex flex-wrap justify-center gap-4 p-4 bg-green-600 rounded-t-3xl shadow-xl border-t-4 border-green-700 z-10 mb-15">
+        <div className="w-full max-w-4xl flex flex-wrap justify-center gap-4 p-4 bg-green-800 rounded-t-3xl shadow-xl border-t-4 border-green-800 z-10 mb-15">
          
-          {playerCards.map((c, i) => (
-            <Card key={i} value={c} />
-          ))}
+         {humanplayer.hand.map((cardValue) => (
+            <Card
+              key = {cardValue}
+              value = {cardValue}
+              isDraggable = {game.gamePhase === gamePhases.playingTrick && humanplayer.isHuman && game.currentPlayerId === humanplayer.id}
+            />
+         ))}
         </div>
       </DndProvider>
 
