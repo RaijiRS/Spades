@@ -82,6 +82,8 @@ const closeModal = useCallback(() => {
 
 //Deal Cards
 const dealCards = useCallback(() => {
+
+  console.log(game.gamePhase)
   const shuffleDeck = createAndShuffleDeck();
   const newPlayers = game.players.map((player, index)=>{
       const startIndex = index * cardsPerHand;
@@ -105,12 +107,15 @@ const dealCards = useCallback(() => {
     humanBidConfirmed: false,
 
   }));
+ 
+  
 
-
-},[game.players]);
+},[]);//took away dependency to fix card dealing error
 
 //Human Bid
 const handleHumanBid = useCallback((bidValue) =>{
+  
+  console.log(game.gamePhase)
   if(game.gamePhase !== gamePhases.bidding || game.players[game.currentPlayerId].isHuman === false) 
   return;
 
@@ -128,7 +133,7 @@ const handleHumanBid = useCallback((bidValue) =>{
       newPhase = gamePhases.playingTrick;
       nextPlayerId = 0;
     }
-
+    console.log(game.gamePhase);
     return{
       ...prevGame,
       players: newPlayers,
@@ -137,44 +142,57 @@ const handleHumanBid = useCallback((bidValue) =>{
       gamePhase: newPhase,
       humanBidConfirmed: true,
     }
+    
   });
     
 }, [game.gamePhase,game.currentPlayerId, game.players]);
 
 // AI bidding(basic random number)
 const aiBid = useCallback((playerId)=>{
-  const bidValue = Math.floor(Math.random() * 4) + 1;
+  
+  console.log(game.gamePhase)
+  const bidValue = Math.floor(Math.random() * 4)+ 1;
 
   setGame(prevGame => {
-    const newPlayers = prevGame.players.map(p =>
+    const updatedPlayers = prevGame.players.map(p =>
       p.id === playerId ? {...p,bid:bidValue} : p
     );
-    const newBidCounts = {...prevGame.bidCounts,[playerId]: bidValue};
+    const updatedBidCounts = {...prevGame.bidCounts,[playerId]: bidValue};
 
-    let nextPlayerId = (playerId + 1) % numPlayers;
-    let newPhase = gamePhases.bidding;
+   const allBidsIn = Object.keys(updatedBidCounts).length === prevGame.players.length;
 
-    if(Object.keys(newBidCounts).length === numPlayers){
-      newPhase = gamePhases.playingTrick;
-      nextPlayerId = 0;
-    }
+
+   let nextPlayerId = prevGame.currentPlayerId;
+   if(allBidsIn){
+    nextPlayerId = prevGame.players[0].id;
+   }else{
+    const currentIndex = prevGame.players.findIndex(p => p.id === playerId);
+    const nextIndex = (currentIndex + 1) % prevGame.players.length;
+    nextPlayerId = prevGame.players[nextIndex].id;
+    
+
+   }
 
     return{
       ...prevGame,
-      players: newPlayers,
-      bidCounts:newBidCounts,
+      players: updatedPlayers,
+      bidCounts:updatedBidCounts,
+      gamePhase: allBidsIn? gamePhases.playingTrick: gamePhases.bidding,
       currentPlayerId: nextPlayerId,
-      gamePhase: newPhase,
     };
 
   });
 
-}, []);
+}, [gamePhases.playingTrick]);
 
 //human play 
 const handleHumanCardPlay = useCallback((cardValue)=>{
+  console.log(game.gamePhase)
+  
   if (game.gamePhase !== gamePhases.playingTrick||game.players[game.currentPlayerId].isHuman === false)
     return;
+
+  console.log("human play")
 
   setGame(prevGame => {
     const newPlayers = prevGame.players.map(p =>
@@ -182,14 +200,27 @@ const handleHumanCardPlay = useCallback((cardValue)=>{
     );
     const newTrick = [...prevGame.currentTrick,{playerId: prevGame.currentPlayerId, cardValue}];
 
+
+        console.log(`Player ${prevGame.currentPlayerId} played card: ${cardValue}`);
+
     //next turn
     let nextPlayerId = (prevGame.currentPlayerId + 1) % numPlayers;
     let newPhase = gamePhases.playingTrick;
 
     if(newTrick.length === numPlayers){
       //IMPLEMENT TRICK WINNER LOGIC
+      
+      
+      
       newPhase = gamePhases.playingTrick;//temp
       nextPlayerId = 0;
+      
+      
+      setModalMessage(
+    `Trick complete: ${newTrick.map((c) => c.cardValue).join(", ")}`
+  );
+  setIsModalOpen(true);
+      
       setModalMessage(`Trick complete ${newTrick.map(c => c.cardValue).join(', ')}`);
       setIsModalOpen(true);
       setTimeout(() =>{
@@ -201,8 +232,8 @@ const handleHumanCardPlay = useCallback((cardValue)=>{
     return{
       ...prevGame,
       players: newPlayers,
-      currentTrick: newTrick.length === numPlayers? []: newTrick,
-      currentPlayerId: newTrick.length === numPlayers? (game.players[0].id) : nextPlayerId,
+      currentTrick: newTrick,
+      currentPlayerId: newTrick.length === numPlayers? prevGame.currentPlayerId : nextPlayerId,
       gamePhase: newPhase,
     };
 
@@ -280,6 +311,7 @@ const humanplayer = game.players[0];
 
   
   return (
+  <DndProvider backend={HTML5Backend}>
     <div className="relative h-screen w-screen bg-green-900 font-inter flex flex-col items-center justify-between">
       
 
@@ -296,6 +328,7 @@ const humanplayer = game.players[0];
        }
 
        return(
+       
           <div key={player.id} className={className}>
               <img src = {player.avatar} alt={`${player.name} Avatar`}/>
               <div className='absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-white text-sm font-bold bg-gray-700 px-2 py-1 rounded'>
@@ -307,7 +340,7 @@ const humanplayer = game.players[0];
                   Bid: {player.bid}
                 </div>
               )}
-              {game.gamePhases === gamePhases.playingTrick && game.currentTrick.find(t => t.playerId === player.id) &&(
+              {game.gamePhase === gamePhases.playingTrick && game.currentTrick.find(t => t.playerId === player.id) &&(
                 <div className='absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30'>
                   <Card value ={game.currentTrick.find(t => t.playerId === player.id).cardValue} isPlayed = {true}/>
                 </div>
@@ -324,7 +357,7 @@ const humanplayer = game.players[0];
 
       
 
-      <DndProvider backend={HTML5Backend}>
+      
         
         <div className="flex-grow flex flex-col items-center justify-center w-full max-w-3xl px-4 z-1">
           <h2 className = 'text-white text-xl font-bold mb-4'>
@@ -357,7 +390,7 @@ const humanplayer = game.players[0];
           )}
 
 
-          <PlayArea onDrop = {handleHumanCardPlay} disabled = {game.gamePhase !== gamePhases.playingTrick|| !humanplayer.isHuman || game.currentPlayerId !== humanplayer.id}/>
+          <PlayArea onDrop = {handleHumanCardPlay} disabled = { false/*game.gamePhase !== gamePhases.playingTrick|| !humanplayer.isHuman || game.currentPlayerId !== humanplayer.id*/}/>
 
           {game.currentTrick.length > 0 && (
             <div className='flex justify-center mt-4 space-x-2'>
@@ -379,7 +412,7 @@ const humanplayer = game.players[0];
         
         <div className="w-full max-w-4xl flex flex-wrap justify-center gap-4 p-4 bg-green-800 rounded-t-3xl shadow-xl border-t-4 border-green-800 z-10 mb-15">
          
-         {humanplayer.hand.map((cardValue) => (
+         {Array.isArray(humanplayer?.hand) && humanplayer.hand.map((cardValue) => (
             <Card
               key = {cardValue}
               value = {cardValue}
@@ -387,11 +420,12 @@ const humanplayer = game.players[0];
             />
          ))}
         </div>
-      </DndProvider>
+      
 
       
       {isModalOpen && <Modal message={modalMessage} onClose={closeModal} />}
     </div>
+    </DndProvider>
   );
 }
 
