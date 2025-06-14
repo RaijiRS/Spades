@@ -28,36 +28,11 @@ const gamePhases = {
 const suits = {'♠': 3, '♥': 2, '♦': 1, '♣': 0}; // Spades, Hearts, Diamonds, Clubs
 const ranks = {'2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, '10': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12};
 
-function getCardValue(card, leadSuit) {
-  const rank = card.rank;
-  const suit = card.suit;
-  const isTrump = suit === '♠';
-  const followsSuit = suit === leadSuit;
+console.log(suits)
 
-  if (isTrump) return 100 + ranks[rank];         // Trump cards always win unless no other trumps
-  if (followsSuit) return 50 + ranks[rank];      // Following lead suit is next highest priority
-  return 0;                                       // Off-suit, non-trump cards
-}
 
-function determineTrickWinner(currentTrick) {
-  if (currentTrick.length === 0) return null;
 
-  const leadSuit = currentTrick[0].suit;
 
-  let winningCard = currentTrick[0];
-  let highestValue = getCardValue(winningCard, leadSuit);
-
-  for (let i = 1; i < currentTrick.length; i++) {
-    const card = currentTrick[i];
-    const value = getCardValue(card, leadSuit);
-    if (value > highestValue) {
-      winningCard = card;
-      highestValue = value;
-    }
-  }
-
-  return winningCard; // assumed card has `.playerId`
-}
 
 function createAndShuffleDeck() {
   const deck = [];
@@ -70,6 +45,7 @@ function createAndShuffleDeck() {
     const j = Math.floor(Math.random() * (i + 1));
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
+  console.log(deck)
   return deck;
 }
 
@@ -184,8 +160,16 @@ const handleHumanBid = useCallback((bidValue) =>{
 // AI bidding(basic random number)
 const aiBid = useCallback((playerId)=>{
   
-  console.log(game.gamePhase)
-  const bidValue = Math.floor(Math.random() * 4)+ 1;
+  function smartBid(hand) {
+  let score = 0;
+  for (let card of hand) {
+    if (card.includes('A') || card.includes('K') || card.includes('Q')) score++;
+    if (card.includes('♠')) score += 0.5;
+  }
+  return Math.max(1, Math.floor(score / 3));
+}
+
+  const bidValue = smartBid
 
   setGame(prevGame => {
     const updatedPlayers = prevGame.players.map(p =>
@@ -241,23 +225,7 @@ const handleHumanCardPlay = useCallback((cardValue)=>{
     let nextPlayerId = (prevGame.currentPlayerId + 1) % numPlayers;
     let newPhase = gamePhases.playingTrick;
 
-    if(newTrick.length === numPlayers){
-      handleTrickWinner(game.currentTrick);
-      
-      
-      setModalMessage(
-    `Trick complete: ${newTrick.map((c) => c.cardValue).join(", ")}`
-  );
-  setIsModalOpen(true);
-      
-      setModalMessage(`Trick complete ${newTrick.map(c => c.cardValue).join(', ')}`);
-      setIsModalOpen(true);
-      setTimeout(() =>{
-        closeModal();
-        setGame(g =>({...g, currentTrick:[], currentPlayerId: g.players[0].id}));
-      },3000); // wait 3 seconds
-    }
-
+    
     return{
       ...prevGame,
       players: newPlayers,
@@ -271,10 +239,103 @@ const handleHumanCardPlay = useCallback((cardValue)=>{
 },[game.gamePhase, game.currentPlayerId, game.players, closeModal,game.currentTrick]);
 
 //ai card play
-const chooseAICard = useCallback((aiHand) => {
-  if(aiHand.length === 0) return null;
-  return aiHand[0];
-},[]);
+function getCardValue(card, leadSuit) {
+  const rankOrder = {
+    '2': 2, '3': 3, '4': 4, '5': 5,
+    '6': 6, '7': 7, '8': 8, '9': 9,
+    '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
+  };
+
+  const rankValue = rankOrder[card.rank] || 0;
+
+  // Spades trump everything
+  if (card.suit === '♠') {
+    // Give spades an offset above other suits
+    return 100 + rankValue;
+  }
+
+  // Cards that are not spades but follow the lead suit rank normally
+  if (card.suit === leadSuit) {
+    return rankValue;
+  }
+
+  // Cards that are neither lead suit nor spades are lowest value
+  return 0;
+}
+
+ function chooseAICard(aiHand, currentTrick, isSpadesBroken) {
+  if (!Array.isArray(aiHand) || aiHand.length === 0) return null;
+
+
+  function parseCard(card) {
+  const suit = card.slice(-1);
+  const rank = card.slice(0, -1);
+  return { rank, suit };
+  }
+
+  // Parse AI hand and trick
+  const parsedHand = aiHand.map(card => ({ ...parseCard(card), original: card }));
+const parsedTrick = currentTrick.map(card => parseCard(card.cardValue));
+  const leadSuit = parsedTrick.length > 0 ? parsedTrick[0].suit : null;
+
+  const cardsOfLeadSuit = parsedHand.filter(card => card.suit === leadSuit);
+  const spades = parsedHand.filter(card => card.suit === '♠');
+  const nonSpades = parsedHand.filter(card => card.suit !== '♠');
+
+  
+
+  const getLowestCard = (cards) => {
+    if (!cards || cards.length === 0) return null;
+    return cards.reduce((lowest, card) =>
+      getCardValue(card, leadSuit) < getCardValue(lowest, leadSuit) ? card : lowest
+    );
+  };
+
+
+
+  
+  // Decision logic
+  if (!leadSuit) {
+    if (isSpadesBroken && spades.length > 0) {
+      return getLowestCard(spades)?.original;
+    } else {
+      const fallback = nonSpades.length > 0 ? nonSpades : parsedHand;
+      return getLowestCard(fallback)?.original;
+    }
+  }
+
+  if (cardsOfLeadSuit.length > 0) {
+    return getLowestCard(cardsOfLeadSuit)?.original;
+  }
+
+  if (spades.length > 0 && isSpadesBroken) {
+    return getLowestCard(spades)?.original;
+  }
+
+  return getLowestCard(parsedHand)?.original;
+
+}
+
+function determineTrickWinner(currentTrick) {
+  if (currentTrick.length === 0) return null;
+
+  const leadSuit = currentTrick[0].suit;
+
+  let winningCard = currentTrick[0];
+  let highestValue = getCardValue(winningCard, leadSuit);
+
+  for (let i = 1; i < currentTrick.length; i++) {
+    const card = currentTrick[i];
+    const value = getCardValue(card, leadSuit);
+    if (value > highestValue) {
+      winningCard = card;
+      highestValue = value;
+    }
+  }
+  console.log(currentTrick)
+  console.log(winningCard);
+  return winningCard; // assumed card has `.playerId`
+}
 
 const handleTrickWinner = useCallback((currentTrick) => {
    
@@ -320,7 +381,8 @@ useEffect(()=> {
     if(game.gamePhase === gamePhases.bidding){
       aiBid(currentPlayer.id);
     }else if (game.gamePhase === gamePhases.playingTrick){
-      const cardToPlay = chooseAICard(currentPlayer.hand);
+      const cardToPlay = chooseAICard(currentPlayer.hand, game.currentTrick,game.isSpadesBroken);
+      console.log(cardToPlay)
       if(cardToPlay){
         setGame(prevGame => {
           const newPlayers = prevGame.players.map(p =>
@@ -333,16 +395,19 @@ useEffect(()=> {
 
             if(newTrick.length === numPlayers){
               
-              handleTrickWinner();
+              const winner = determineTrickWinner(newTrick);
+              handleTrickWinner(newTrick);
               newPhase = gamePhases.playingTrick;
-              nextPlayerId = trickWinner;
-              setModalMessage(`AI played Trick Over! Cards: ${newTrick.map(c=>c.cardValue).join(', ')}.(winner logic pending)`);
+              nextPlayerId = winner.playerId;
+              console.log(winner.playerId);
+              console.log(game.trickCounts)
+              setModalMessage(`AI played Trick Over! Cards: ${newTrick.map(c=>c.cardValue).join(', ')}.Winner is ${winner.playerId} tricks Won ${game.trickCounts[winner.playerId]}`);
               setIsModalOpen(true);
               setTimeout(()=> {
                 closeModal();
                 setGame(g => ({...g, currentTrick: [], currentPlayerId: g.players[0].id}));
 
-              },3000);
+              },7000);
             }
 
             return{
