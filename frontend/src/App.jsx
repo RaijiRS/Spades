@@ -239,29 +239,46 @@ const handleHumanCardPlay = useCallback((cardValue)=>{
 },[game.gamePhase, game.currentPlayerId, game.players, closeModal,game.currentTrick]);
 
 //ai card play
-function getCardValue(card, leadSuit) {
+function getCardValue(card) {
+  // Auto-parse if card is a string
+  if (typeof card === 'string') {
+    const suit = card.slice(-1);
+    const rank = card.slice(0, -1);
+
+    // Validate parsed components
+    if (!rank || !suit) {
+      throw new Error(`Invalid card format: "${card}"`);
+    }
+
+    card = { rank, suit };
+  }
+
+  if (!card || typeof card !== 'object' || !card.rank || !card.suit) {
+    throw new Error(`Invalid card object: ${JSON.stringify(card)}`);
+  }
+
   const rankOrder = {
     '2': 2, '3': 3, '4': 4, '5': 5,
     '6': 6, '7': 7, '8': 8, '9': 9,
     '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
   };
 
-  const rankValue = rankOrder[card.rank] || 0;
+  const rankValue = rankOrder[String(card.rank)];
 
-  // Spades trump everything
-  if (card.suit === '♠') {
-    // Give spades an offset above other suits
-    return 100 + rankValue;
+  if (rankValue === undefined) {
+    throw new Error(`Invalid rank: ${card.rank}`);
   }
 
-  // Cards that are not spades but follow the lead suit rank normally
-  if (card.suit === leadSuit) {
-    return rankValue;
+  switch (card.suit) {
+    case '♠': return 100 + rankValue;
+    case '♥': return 75 + rankValue;
+    case '♦': return 50 + rankValue;
+    case '♣': return 25 + rankValue;
+    default: throw new Error(`Invalid suit: ${card.suit}`);
   }
-
-  // Cards that are neither lead suit nor spades are lowest value
-  return 0;
 }
+
+
 
  function chooseAICard(aiHand, currentTrick, isSpadesBroken) {
   if (!Array.isArray(aiHand) || aiHand.length === 0) return null;
@@ -287,7 +304,7 @@ const parsedTrick = currentTrick.map(card => parseCard(card.cardValue));
   const getLowestCard = (cards) => {
     if (!cards || cards.length === 0) return null;
     return cards.reduce((lowest, card) =>
-      getCardValue(card, leadSuit) < getCardValue(lowest, leadSuit) ? card : lowest
+      getCardValue(card) < getCardValue(lowest) ? card : lowest
     );
   };
 
@@ -322,11 +339,11 @@ function determineTrickWinner(currentTrick) {
   const leadSuit = currentTrick[0].suit;
 
   let winningCard = currentTrick[0];
-  let highestValue = getCardValue(winningCard, leadSuit);
+  let highestValue = getCardValue(winningCard.cardValue);
 
   for (let i = 1; i < currentTrick.length; i++) {
     const card = currentTrick[i];
-    const value = getCardValue(card, leadSuit);
+    const value = getCardValue(card.cardValue);
     if (value > highestValue) {
       winningCard = card;
       highestValue = value;
@@ -337,26 +354,7 @@ function determineTrickWinner(currentTrick) {
   return winningCard; // assumed card has `.playerId`
 }
 
-const handleTrickWinner = useCallback((currentTrick) => {
-   
-  const winner = determineTrickWinner(currentTrick);
 
-  setGame(prevGame => {
-
-    const newTrickHistory = [...prevGame.trickHistory, currentTrick];
-    const newTrickCounts = {...prevGame.trickCounts};
-    newTrickCounts[winner.playerId] = (newTrickCounts[winner.playerId] || 0) + 1;
-
-    return{
-      ...prevGame,
-      currentTrick: [],
-      currentPlayerId: winner.playerId,
-      trickHistory: newTrickHistory,
-      trickCounts: newTrickCounts,
-    };
-
-  });
-});
  
 //game flow
 
@@ -396,7 +394,7 @@ useEffect(()=> {
             if(newTrick.length === numPlayers){
               
               const winner = determineTrickWinner(newTrick);
-              handleTrickWinner(newTrick);
+
               newPhase = gamePhases.playingTrick;
               nextPlayerId = winner.playerId;
               console.log(winner.playerId);
