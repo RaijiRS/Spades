@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 
@@ -28,7 +28,6 @@ const gamePhases = {
 const suits = {'♠': 3, '♥': 2, '♦': 1, '♣': 0}; // Spades, Hearts, Diamonds, Clubs
 const ranks = {'2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, '10': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12};
 
-console.log(suits)
 
 
 
@@ -45,7 +44,6 @@ function createAndShuffleDeck() {
     const j = Math.floor(Math.random() * (i + 1));
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
-  console.log(deck)
   return deck;
 }
 
@@ -75,7 +73,7 @@ const [game, setGame] = useState({
   trickCounts: { 0: 0, 1: 0, 2: 0, 3: 0 }, 
   teamScores: {teamA: 0, teamB: 0},
   bags: {teamA: 0, teamB: 0},
-
+  isSpadesBroken: false,
 });
 
 
@@ -93,39 +91,41 @@ const closeModal = useCallback(() => {
 //Deal Cards
 const dealCards = useCallback(() => {
 
-  console.log(game.gamePhase)
-  const shuffleDeck = createAndShuffleDeck();
-  const newPlayers = game.players.map((player, index)=>{
-      const startIndex = index * cardsPerHand;
-      const endIndex = startIndex + cardsPerHand;
+
+ 
+  const shuffled = createAndShuffleDeck();
+  setGame(prevGame => {
+    const newPlayers = prevGame.players.map((p,index) => {
+      const start = index * cardsPerHand;
+      const end = start + cardsPerHand;
       return{
-        ...player,
-        hand:shuffleDeck.slice(startIndex, endIndex),
+        ...p,
+        hand: shuffled.slice(start,end),
         bid:null,
-        tricksWon:0,
-      }; 
+        tricksWon: 0,
+      };
+    });
+
+    return {
+      ...prevGame,
+      players: newPlayers,
+      gamePhase: gamePhases.bidding,
+      currentPlayerId: 0,
+      currentTrick: [],
+      bidCounts: {},
+      humanBidConfirmed: false,
+      isSpadesBroken: false,
+    };
+
 
   });
-
-  setGame(prevGame => ({
-    ...prevGame,
-    players: newPlayers,
-    gamePhase: gamePhases.bidding,
-    currentPlayerId: 0,
-    currentTrick:[],
-    bidCounts:{},
-    humanBidConfirmed: false,
-
-  }));
- 
   
 
-},[]);//took away dependency to fix card dealing error
+},[]);
 
 //Human Bid
 const handleHumanBid = useCallback((bidValue) =>{
   
-  console.log(game.gamePhase)
   if(game.gamePhase !== gamePhases.bidding || game.players[game.currentPlayerId].isHuman === false) 
   return;
 
@@ -143,7 +143,6 @@ const handleHumanBid = useCallback((bidValue) =>{
       newPhase = gamePhases.playingTrick;
       nextPlayerId = 0;
     }
-    console.log(game.gamePhase);
     return{
       ...prevGame,
       players: newPlayers,
@@ -169,9 +168,10 @@ const aiBid = useCallback((playerId)=>{
   return Math.max(1, Math.floor(score / 3));
 }
 
-  const bidValue = smartBid
+  
 
   setGame(prevGame => {
+    const bidValue = smartBid(prevGame.players[playerId].hand);
     const updatedPlayers = prevGame.players.map(p =>
       p.id === playerId ? {...p,bid:bidValue} : p
     );
@@ -190,48 +190,62 @@ const aiBid = useCallback((playerId)=>{
     
 
    }
+   
+   console.log(prevGame.gamePhase);
+   console.log('bidCounts keys:', Object.keys(updatedBidCounts));
+console.log('players count:', prevGame.players.length);
+console.log('allBidsIn:', allBidsIn);
+
 
     return{
       ...prevGame,
       players: updatedPlayers,
       bidCounts:updatedBidCounts,
-      gamePhase: allBidsIn? gamePhases.playingTrick: gamePhases.bidding,
+      gamePhase: allBidsIn? gamePhases.playingTrick:prevGame.gamePhase,
       currentPlayerId: nextPlayerId,
     };
 
   });
 
-}, [game.currentPlayerId]);
+}, []);
 
 //human play 
 const handleHumanCardPlay = useCallback((cardValue)=>{
-  console.log(game.gamePhase)
-  //still in dealing phase BUG!!
-  if (game.gamePhase !== /*gamePhases.playingTrick||*/game.players[game.currentPlayerId].isHuman === false)
-    return;
-
-  console.log("human play")
-
-  setGame(prevGame => {
+ setGame(prevGame => {
     const newPlayers = prevGame.players.map(p =>
       p.id === prevGame.currentPlayerId? {...p, hand: p.hand.filter(c => c !== cardValue)} : p
     );
     const newTrick = [...prevGame.currentTrick,{playerId: prevGame.currentPlayerId, cardValue}];
+    const spadesBroken = prevGame.isSpadesBroken || cardValue.includes('♠');
 
 
-        console.log(`Player ${prevGame.currentPlayerId} played card: ${cardValue}`);
+
+     if (newTrick.length === numPlayers) {
+      const winner = determineTrickWinner(newTrick);
+
+      return {
+        ...prevGame,
+        players: newPlayers.map(p =>
+          p.id === winner ? { ...p, tricksWon: p.tricksWon + 1 } : p
+        ),
+        currentTrick: [],
+        currentPlayerId: winner,
+        isSpadesBroken: spadesBroken,
+      };
+    }
+
 
     //next turn
     let nextPlayerId = (prevGame.currentPlayerId + 1) % numPlayers;
-    let newPhase = gamePhases.playingTrick;
 
     
     return{
       ...prevGame,
       players: newPlayers,
       currentTrick: newTrick,
-      currentPlayerId: newTrick.length === numPlayers? prevGame.currentPlayerId : nextPlayerId,
-      gamePhase: newPhase,
+      currentPlayerId: nextPlayerId,
+      gamePhase: gamePhases.playingTrick,
+      isSpadesBroken: spadesBroken,
     };
 
 
@@ -290,6 +304,13 @@ function getCardValue(card) {
   return { rank, suit };
   }
 
+  const getLowestCard = (cards) => {
+    if (!cards || cards.length === 0) return null;
+    return cards.reduce((lowest, card) =>
+      getCardValue(card) < getCardValue(lowest) ? card : lowest
+    );
+  };
+  
   // Parse AI hand and trick
   const parsedHand = aiHand.map(card => ({ ...parseCard(card), original: card }));
 const parsedTrick = currentTrick.map(card => parseCard(card.cardValue));
@@ -301,12 +322,7 @@ const parsedTrick = currentTrick.map(card => parseCard(card.cardValue));
 
   
 
-  const getLowestCard = (cards) => {
-    if (!cards || cards.length === 0) return null;
-    return cards.reduce((lowest, card) =>
-      getCardValue(card) < getCardValue(lowest) ? card : lowest
-    );
-  };
+  
 
 
 
@@ -328,104 +344,143 @@ const parsedTrick = currentTrick.map(card => parseCard(card.cardValue));
   if (spades.length > 0 && isSpadesBroken) {
     return getLowestCard(spades)?.original;
   }
-
+  console.log(getLowestCard(parsedHand)?.original);
   return getLowestCard(parsedHand)?.original;
 
 }
 
 function determineTrickWinner(currentTrick) {
-  if (currentTrick.length === 0) return null;
+  
+if (currentTrick.length === 0) return null;
+const leadSuit = currentTrick[0].cardValue.slice(-1);
 
-  const leadSuit = currentTrick[0].suit;
+const toParsed = s => ({rank: s.slice(0,-1), suit: s.slice(-1)});
+const rankOrder = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14};
+const highest = (arr) => 
+  arr.reduce((best, card) => {
+    const r = rankOrder[card.cardValue.slice(0,-1)];
+    if(!best) return {r, card};
+    return r > best.r ? {r, card} : best;
+  }, null).card.playerId;
 
-  let winningCard = currentTrick[0];
-  let highestValue = getCardValue(winningCard.cardValue);
-
-  for (let i = 1; i < currentTrick.length; i++) {
-    const card = currentTrick[i];
-    const value = getCardValue(card.cardValue);
-    if (value > highestValue) {
-      winningCard = card;
-      highestValue = value;
-    }
-  }
-  console.log(currentTrick)
-  console.log(winningCard);
-  return winningCard; // assumed card has `.playerId`
+const spades = currentTrick.filter(t => toParsed(t.cardValue).suit === '♠');
+if(spades.length> 0){
+  return highest(spades);
 }
+const ofLead = currentTrick.filter(t => toParsed(t.cardValue).suit === leadSuit);
+return highest(ofLead);
+}
+
+
+
+
+
+
+
+
+
 
 
  
 //game flow
 
-const [hasDealtCards, setHasDealtCards] = useState(false);
-
+const hasDealtCards = useRef(false);
+const humanplayer = game.players.find(p => p.isHuman);
+  const currentPlayer = game.players[game.currentPlayerId];
+  const isHumanTurn = (
+    game.gamePhase === gamePhases.playingTrick &&
+    currentPlayer?.isHuman &&
+    currentPlayer?.id === humanplayer.id
+  );
 
 useEffect(() => {
-  if (!hasDealtCards) {
+  if (!hasDealtCards.current) {
     dealCards();
-    setHasDealtCards(true);
+    hasDealtCards.current = true;
   }
-}, [hasDealtCards, dealCards]);
+}, [dealCards]);
 
-useEffect(()=> {
-  const currentPlayer = game.players[game.currentPlayerId];
+useEffect(() => {
 
-  if(!currentPlayer || currentPlayer.isHuman){
-    return;
-  }
+    const currentPlayer = game.players[game.currentPlayerId];
+    if(!currentPlayer|| currentPlayer.isHuman) return;  
 
-  const timer = setTimeout(()=> {
-    if(game.gamePhase === gamePhases.bidding){
-      aiBid(currentPlayer.id);
-    }else if (game.gamePhase === gamePhases.playingTrick){
-      const cardToPlay = chooseAICard(currentPlayer.hand, game.currentTrick,game.isSpadesBroken);
-      console.log(cardToPlay)
-      if(cardToPlay){
-        setGame(prevGame => {
-          const newPlayers = prevGame.players.map(p =>
-            p.id === currentPlayer.id ? {...p, hand: p.hand.filter(c => c !== cardToPlay)} : p
-          );
-            const newTrick = [...prevGame.currentTrick, {playerId: currentPlayer.id, cardValue: cardToPlay}];
+  const timer = setTimeout(() => {
+    setGame(prevGame => {
+      const cp = prevGame.players[prevGame.currentPlayerId];
+      if (!cp || cp.isHuman) return prevGame;
 
-            let nextPlayerId = (currentPlayer.id + 1) % numPlayers;
-            let newPhase = gamePhases.playingTrick;
-
-            if(newTrick.length === numPlayers){
-              
-              const winner = determineTrickWinner(newTrick);
-
-              newPhase = gamePhases.playingTrick;
-              nextPlayerId = winner.playerId;
-              console.log(winner.playerId);
-              console.log(game.trickCounts)
-              setModalMessage(`AI played Trick Over! Cards: ${newTrick.map(c=>c.cardValue).join(', ')}.Winner is ${winner.playerId} tricks Won ${game.trickCounts[winner.playerId]}`);
-              setIsModalOpen(true);
-              setTimeout(()=> {
-                closeModal();
-                setGame(g => ({...g, currentTrick: [], currentPlayerId: g.players[0].id}));
-
-              },7000);
-            }
-
-            return{
-              ...prevGame,
-              players: newPlayers,
-              currentTrick: newTrick.length === numPlayers ? [] : newTrick,
-              currentPlayerId: newTrick.length === numPlayers ? (game.players[0].id): nextPlayerId,
-              gamePhase: newPhase,
-            };
-
-        });
+      // AI Bid Phase
+      if (prevGame.gamePhase === gamePhases.bidding) {
+        aiBid(cp.id);
+        return prevGame; // bidding handled elsewhere
       }
-    }
+
+      // AI Playing Phase
+      if (prevGame.gamePhase === gamePhases.playingTrick) {
+        const cardToPlay = chooseAICard(cp.hand, prevGame.currentTrick, prevGame.isSpadesBroken);
+
+        if (!cardToPlay) return prevGame;
+
+        // Track spades broken
+        const spadesBroken = prevGame.isSpadesBroken || cardToPlay.includes('♠');
+
+        const newPlayers = prevGame.players.map(p =>
+          p.id === cp.id ? { ...p, hand: p.hand.filter(c => c !== cardToPlay) } : p
+        );
+
+        const newTrick = [...prevGame.currentTrick, { playerId: cp.id, cardValue: cardToPlay }];
+
+        // Trick complete
+        if (newTrick.length === numPlayers) {
+          const winner = determineTrickWinner(newTrick);
+
+        
+
+        
+            
+            setGame(g => ({
+              ...g,
+              currentTrick: [],
+              currentPlayerId: winner,
+            }));
+          
+
+          return {
+            ...prevGame,
+            players: newPlayers.map(p =>
+              p.id === winner ? { ...p, tricksWon: p.tricksWon + 1 } : p
+            ),
+            currentTrick: [],
+            currentPlayerId: winner,
+            isSpadesBroken: spadesBroken,
+          };
+        }
+
+        // Trick not complete yet
+        const nextPlayerId = (cp.id + 1) % numPlayers;
+        return {
+          ...prevGame,
+          players: newPlayers,
+          currentTrick: newTrick,
+          currentPlayerId: nextPlayerId,
+          isSpadesBroken: spadesBroken,
+        };
+      }
+        
+
+
+
+
+
+      return prevGame;
+    });
   }, 1000);
 
   return () => clearTimeout(timer);
+}, [game.currentPlayerId, game.gamePhase, game.players, aiBid, chooseAICard, closeModal]);
 
-},[game.currentPlayerId,game.gamePhase,game.players, aiBid, chooseAICard, closeModal]);
  
-const humanplayer = game.players[0];
 
 
   
@@ -448,24 +503,40 @@ const humanplayer = game.players[0];
           className += 'border-purple-400 ring-4 ring-purple-400';
        }
 
+
        return(
        
           <div key={player.id} className={className}>
-              <img src = {player.avatar} alt={`${player.name} Avatar`}/>
+              <img
+                src={player.avatar}
+                alt={`${player.name} Avatar`}
+                className="w-full h-full object-cover rounded-full"
+              />
+
+              {/*Player name*/}
               <div className='absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-white text-sm font-bold bg-gray-700 px-2 py-1 rounded'>
                 {player.name}
               
               </div>
-              {game.gamePhase !== gamePhases.dealing && player.bid !== null && (
+              
+              {/*Player bid*/}
+
+              {game.gamePhase !== gamePhases.dealing && player.bid != null && player.bid !== '' && (
                 <div className='absolute -top-6 left-1/2 transform -translate-x-1/2 text-white text-md font-bold bg-purple-700 px-2 py-1 rounded'>
                   Bid: {player.bid}
                 </div>
               )}
+              {/*Card being Played
               {game.gamePhase === gamePhases.playingTrick && game.currentTrick.find(t => t.playerId === player.id) &&(
                 <div className='absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30'>
                   <Card value ={game.currentTrick.find(t => t.playerId === player.id).cardValue} isPlayed = {true}/>
                 </div>
-              )}
+              )}*/}
+              {/*Tricks won box*/}
+              <div className = 'absolute -right-6 top-1/2 transform -translate-y-1/2 text-white text-md font-bold bg-blue-700 px-2 py-1 rounded shadow'>
+                {player.tricksWon}
+              </div>
+              
               </div>
 
        );
@@ -493,6 +564,8 @@ const humanplayer = game.players[0];
             }
           </h2>
 
+
+
           {game.gamePhase === gamePhases.bidding && humanplayer.isHuman && game.currentPlayerId === humanplayer.id && !game.humanBidConfirmed && (
             <div className='flex items-center space-x-2 mb-4'>
               <label htmlFor= "bid" className='text-white text-lg'>Your Bid: </label>
@@ -511,7 +584,10 @@ const humanplayer = game.players[0];
           )}
 
 
-          <PlayArea onDrop = {handleHumanCardPlay} disabled = { false/*game.gamePhase !== gamePhases.playingTrick|| !humanplayer.isHuman || game.currentPlayerId !== humanplayer.id*/}/>
+          <PlayArea 
+            onDrop = {handleHumanCardPlay} 
+            disabled = {!isHumanTurn}
+          />
 
           {game.currentTrick.length > 0 && (
             <div className='flex justify-center mt-4 space-x-2'>
@@ -534,10 +610,15 @@ const humanplayer = game.players[0];
         <div className="w-full max-w-4xl flex flex-wrap justify-center gap-4 p-4 bg-green-800 rounded-t-3xl shadow-xl border-t-4 border-green-800 z-10 mb-15">
          
          {Array.isArray(humanplayer?.hand) && humanplayer.hand.map((cardValue) => (
+            
+
+
+
+            
             <Card
               key = {cardValue}
               value = {cardValue}
-              isDraggable = {game.gamePhase === gamePhases.playingTrick && humanplayer.isHuman && game.currentPlayerId === humanplayer.id}
+              isDraggable = {isHumanTurn}
             />
          ))}
         </div>
