@@ -50,10 +50,10 @@ function createAndShuffleDeck() {
 
 //Player data
 const initialPlayers = [
-    {id:0, name: 'You',hand:[],bid:null,tricksWon:0,score:0,isHuman:true, avatar: dudu},
-    {id:1, name: 'Iggy',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar: Iggy},
-    {id:2, name: 'Raffey',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar: raffey},
-    {id:3, name: 'BlindMan',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar:blindMan},
+    {id:0, name: 'You',hand:[],bid:null,tricksWon:0,score:0,isHuman:true, avatar: dudu, team:1},
+    {id:1, name: 'Iggy',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar: Iggy, team:2},
+    {id:2, name: 'Raffey',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar: raffey, team:1},
+    {id:3, name: 'BlindMan',hand:[],bid:null,tricksWon:0,score:0,isHuman:false, avatar:blindMan, team:2},
     
 
 
@@ -219,7 +219,7 @@ const handleHumanCardPlay = useCallback((cardValue)=>{
     const spadesBroken = prevGame.isSpadesBroken || cardValue.includes('♠');
 
 
-
+      //determine winner when ending on human
      if (newTrick.length === numPlayers) {
       const winner = determineTrickWinner(newTrick);
 
@@ -371,9 +371,53 @@ const ofLead = currentTrick.filter(t => toParsed(t.cardValue).suit === leadSuit)
 return highest(ofLead);
 }
 
+function resolveRound(prevGame){
+  
+  //check if all hands are empty
+  const allHandsEmpty = prevGame.players.every(p => p.hand.length === 0);
+  console.log(allHandsEmpty);
+  if(!allHandsEmpty) return prevGame;
 
+  //calculate scores
+  console.log(prevGame.players)
+  const updatedPlayers = calculateScores(prevGame.players);
 
+  //check if a team has 500
+  const team1Score = updatedPlayers.filter(p => p.team === 1).reduce((sum,p) => sum + p.score, 0);
 
+  const team2Score = updatedPlayers.filter(p => p.team === 2).reduce((sum,p) => sum + p.score, 0);
+  console.log(team1Score);
+  console.log(team2Score);
+  console.log(updatedPlayers);
+  if(team1Score >= 500 || team2Score >=500){
+    return{
+      ...prevGame,
+      players: updatedPlayers,
+      gamePhase: gamePhases.gameEnd,
+      winner: team1Score >= 500 ? 1 : 2,
+    };
+  }
+
+  return{
+    ...prevGame,
+    players: updatedPlayers,
+    gamePhase: gamePhases.roundEnd
+  };
+
+}
+
+function calculateScores(players){
+  return players.map(p => {
+    let points = 0;
+    if(p.tricksWon >= p.bid) {
+      points = p.bid * 10 + (p.tricksWon - p.bid);
+    }else{
+      points = -p.bid * 10;
+    }
+    console.log(points);
+    return {...p, score: p.score + points };
+  });
+}
 
 
 
@@ -435,26 +479,26 @@ useEffect(() => {
         if (newTrick.length === numPlayers) {
           const winner = determineTrickWinner(newTrick);
 
-        
+          const updatedPlayers = newPlayers.map(p =>
+            p.id === winner ? {...p, tricksWon: p.tricksWon + 1} : p
+          );
 
-        
-            
-            setGame(g => ({
-              ...g,
-              currentTrick: [],
-              currentPlayerId: winner,
-            }));
-          
-
-          return {
+          let nextState = {
             ...prevGame,
-            players: newPlayers.map(p =>
-              p.id === winner ? { ...p, tricksWon: p.tricksWon + 1 } : p
-            ),
+            players: updatedPlayers,
             currentTrick: [],
             currentPlayerId: winner,
             isSpadesBroken: spadesBroken,
+            gamePhase: gamePhases.playingTrick,
           };
+
+          nextState = resolveRound(nextState);
+          console.log(nextState.gamePhase)
+          return nextState;
+
+        
+            
+            
         }
 
         // Trick not complete yet
