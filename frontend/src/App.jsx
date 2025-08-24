@@ -221,18 +221,24 @@ const handleHumanCardPlay = useCallback((cardValue)=>{
 
       //determine winner when ending on human
      if (newTrick.length === numPlayers) {
-      const winner = determineTrickWinner(newTrick);
+  const winner = determineTrickWinner(newTrick);
 
-      return {
-        ...prevGame,
-        players: newPlayers.map(p =>
-          p.id === winner ? { ...p, tricksWon: p.tricksWon + 1 } : p
-        ),
-        currentTrick: [],
-        currentPlayerId: winner,
-        isSpadesBroken: spadesBroken,
-      };
-    }
+  let nextState = {
+    ...prevGame,
+    players: newPlayers.map(p =>
+      p.id === winner ? { ...p, tricksWon: p.tricksWon + 1 } : p
+    ),
+    currentTrick: [],
+    currentPlayerId: winner,
+    isSpadesBroken: spadesBroken,
+  };
+
+  // ✅ check if the round is over
+  nextState = resolveRound(nextState);
+
+  return nextState;
+}
+
 
 
     //next turn
@@ -419,10 +425,60 @@ function calculateScores(players){
   });
 }
 
+const startNextRound = useCallback(() => {
+  setGame(prev => {
+    const resetPlayers = prev.players.map(p => ({
+      ...p,
+      tricksWon: 0,
+      bid: null,
+      hand: [],
+    }));
 
+    const shuffled = createAndShuffleDeck();
+    const redealtPlayers = resetPlayers.map((p, index) => {
+      const start = index * cardsPerHand;
+      const end = start + cardsPerHand;
+      return{
+        ...p,
+        hand: shuffled.slice(start,end),
+      };
+    });
+    return{
+      ...prev,
+      players: redealtPlayers,
+      currentTrick: [],
+      currentPlayerId: 0,
+      bidCounts: {},
+      humanBidConfirmed: false,
+      isSpadesBroken: false,
+      gamePhase: gamePhases.bidding,
+    };
 
+  });
+}, []);
 
+const restartGame = useCallback(() => {
+  setGame({
+    players: initialPlayers.map(p => ({ ...p, hand: [], bid:null, tricksWon: 0, score: 0})),
+    currentPlayerId: 0,
+    gamePhase: gamePhases.dealing,
+    currentTrick: [],
+    bidCounts: {},
+    humanBidConfirmed:false,
+    trickHistory:[],
+    trickCounts: {0: 0, 1:0, 2: 0, 3: 0},
+    teamScores: {teamA: 0, teamB: 0},
+    bags: {teamA: 0, teamB: 0},
+    isSpadesBroken: false,
+  });
+  hasDealtCards.current = false;
+}, []);
 
+const team1Score = game.players.filter(p => p.team === 1)
+  .reduce((sum, p) => sum + p.score, 0);
+
+const team2Score = game.players.filter(p => p.team === 2)
+  .reduce((sum, p) => sum + p.score,0);
 
 
  
@@ -549,6 +605,8 @@ useEffect(() => {
 
 
        return(
+
+        
        
           <div key={player.id} className={className}>
               <img
@@ -591,7 +649,35 @@ useEffect(() => {
 
 
 
-      
+      {game.gamePhase === gamePhases.roundEnd &&(
+          <div className='absolute inset-0 flex items-center justify-center bg-opacity-70 z-50'>
+            <div className='bg-white rounded-2x1 p-6 text-center shadow-xl'>
+              <h2 className='text-xl font-bold mb-4 text-black'>Round Over</h2>
+              <p className='mb-4 text-black'>Team 1: {team1Score} | Team 2: {team2Score}</p>
+              <button
+                className='bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600'
+                onClick={startNextRound}
+              >
+                Start Next Round 
+              </button>
+            </div>
+          </div>
+        )}
+
+        {game.gamePhase === gamePhases.gameEnd&& (
+          <div className='absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 z-50'>
+            <div className='bg-white rounded-2x1 p-6 text-center shadow-xl'>
+                <h2 className='text-2x1 font-bold mb-4 text-black'>Game Over</h2>
+                <p className='mb-4 text-black'>Winner: Team {game.winner}</p>
+                <button
+                  className='bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600'
+                  onClick={restartGame}
+                >
+                  Play Again
+                </button>
+            </div>
+          </div>
+        )}
 
       
         
