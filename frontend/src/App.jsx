@@ -583,6 +583,7 @@ useEffect(() => {
  
 
 
+
   
 
   
@@ -757,6 +758,12 @@ useEffect(() => {
       
       {isModalOpen && <Modal message={modalMessage} onClose={closeModal} />}
     </div>
+    
+    <div className="absolute top-4 right-4 bg-white text-black rounded-lg shadow-lg p-4 z-50">
+  <h3 className="font-bold text-lg mb-2">Scoreboard</h3>
+  <p>Team 1: {team1Score}</p>
+  <p>Team 2: {team2Score}</p>
+</div>
     </DndProvider>
   );
 }
